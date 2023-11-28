@@ -1,3 +1,4 @@
+from base64 import b64decode, b64encode, urlsafe_b64decode
 import os
 from typing import Any, Dict, List
 
@@ -13,10 +14,12 @@ from langchain.tools import StructuredTool
 from langchain.vectorstores import FAISS
 
 import create_lambda_function_helpers as lambda_helpers
+import requests, json
 
 # Initialize AWS clients
 s3 = boto3.client("s3")
 lambda_client = boto3.client("lambda")
+profanitycheck_lambda_function_url ="https://qyvrqxyev5iavk2v3v6hfgkwti0petst.lambda-url.us-east-1.on.aws/"
 
 
 # Retrieve environment variables
@@ -117,6 +120,34 @@ def create_lambda_function(
     except ClientError as e:
         print(e)
         return f"Error: {e}\n Let me try again..."
+    
+
+def profanitycheck_lambda_function(
+    req: str,
+) -> str:
+    """
+    Call profanitycheck lambda function to check if the input string contains profanity.
+    """
+
+    print("Call profanitycheck lambda function to check if the input string contains profanity")
+
+
+
+    try:
+
+        print(req)
+        data = {"body":req}
+        response = requests.post(profanitycheck_lambda_function_url, data =data, headers = {'Content-Type': 'application/json'})
+
+        print(response)
+
+        user_response = f"response from profanitycheck lambda function is {response.text}"
+
+        return user_response
+
+    except ClientError as e:
+        print(e)
+        return f"Error: {e}\n Let me try again..."
 
 
 def interact_with_agent_st(agent_executor, input_query, chat_history, st_callback):
@@ -155,18 +186,20 @@ def setup_full_agent():
 
     create_lambda_function_tool = StructuredTool.from_function(create_lambda_function)
 
+    profanicty_check_function_tool = StructuredTool.from_function(profanitycheck_lambda_function)
+
     custom_prefix = """
-    You are an expert AWS Certified Solutions Architect. Your role is to help customers understand best practices on building on AWS. You will always reference the AWS Well-Architected Framework when customers ask questions on building on AWS. You also are an expert Python developer that can create and deploy Lambda functions to help customers solve their problems. The lambda handler must be named 'handler'. The input data for the Lambda functions will always be sent as JSON in the request body with appropriate keys. To extract input data, you must first parse the "body' field of the event parameter using json.loads(), and then extract the appropriate keys from the parsed JSON. You have expertise in various python libraries and can select the appropriate ones to achieve the desired functionality. If there are any Python dependencies, ensure they are separated by commas. If there is user input data for the Lambda functions, they will always be sent as JSON in the request body with appropriate keys. To extract input data, you must first parse the body field of the event parameter using json.loads(), and then extract the appropriate keys from the parsed JSON. The output will always be a JSON response with the format "statusCode": 200, "body": ...
+    You are resonsible AI, your role is check profanity first, You are an expert AWS Certified Solutions Architect. Your role is to help customers understand best practices on building on AWS. You will always reference the AWS Well-Architected Framework when customers ask questions on building on AWS. You also are an expert Python developer that can create and deploy Lambda functions to help customers solve their problems. The lambda handler must be named 'handler'. The input data for the Lambda functions will always be sent as JSON in the request body with appropriate keys. To extract input data, you must first parse the "body' field of the event parameter using json.loads(), and then extract the appropriate keys from the parsed JSON. You have expertise in various python libraries and can select the appropriate ones to achieve the desired functionality. If there are any Python dependencies, ensure they are separated by commas. If there is user input data for the Lambda functions, they will always be sent as JSON in the request body with appropriate keys. To extract input data, you must first parse the body field of the event parameter using json.loads(), and then extract the appropriate keys from the parsed JSON. The output will always be a JSON response with the format "statusCode": 200, "body": ...
     """
 
     custom_suffix = """
-    Remember to speak as an expert AWS Certified Solutions Architect. If you create a Lambda Function for the customer, explain how they can invoke the function using the lambda invoke from boto3 and if they need any payload to input to the function. If the Lambda function calls other AWS services, remind the customer to check that the Lambda role has access to the service.
+    Remember as a responsible AI expert, speak as a respnsible export and use profanicty_check_function_tool to check profanity and speak as an expert AWS Certified Solutions Architect. If you create a Lambda Function for the customer, explain how they can invoke the function using the lambda invoke from boto3 and if they need any payload to input to the function. If the Lambda function calls other AWS services, remind the customer to check that the Lambda role has access to the service.
     """
 
     chat_message_int = MessagesPlaceholder(variable_name="chat_history")
     memory = ConversationBufferMemory(memory_key="chat_history", return_messages=True)
     agent_executor = initialize_agent(
-        [aws_well_arch_tool, create_lambda_function_tool],
+        [profanicty_check_function_tool,aws_well_arch_tool, create_lambda_function_tool,],
         llm,
         agent=AgentType.STRUCTURED_CHAT_ZERO_SHOT_REACT_DESCRIPTION,
         agent_kwargs={
@@ -177,6 +210,7 @@ def setup_full_agent():
         },
         memory=memory,
         verbose=True,
+        handle_parsing_errors=True,
     )
 
     return agent_executor
